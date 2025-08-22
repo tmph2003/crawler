@@ -255,6 +255,16 @@ class PlaywrightHelper:
     def generate_js_fetch(self, method: str, url: str, headers: dict) -> str:
         """Generate a javascript fetch function for use in playwright"""
         headers_js = json.dumps(headers)
+        print(f"""
+            () => {{
+                return new Promise((resolve, reject) => {{
+                    fetch('{url}', {{ method: '{method}', headers: {headers_js} }})
+                        .then(response => response.text())
+                        .then(data => resolve(data))
+                        .catch(error => reject(error.message));
+                }});
+            }}
+        """)
         return f"""
             () => {{
                 return new Promise((resolve, reject) => {{
@@ -310,19 +320,25 @@ class PlaywrightHelper:
 
     async def run_fetch_script(self, url: str, headers: dict, **kwargs):
         """
-        Execute a javascript fetch function in a session
+        Fetch một URL bằng Playwright context.request (tránh CORS).
 
         Args:
-            url (str): The url to fetch.
-            headers (dict): The headers to use for the fetch.
+            url (str): Đường dẫn cần fetch.
+            headers (dict): Headers gửi kèm request.
 
         Returns:
-            any: The result of the fetch. Seems to be a string or dict
+            str: Response body (text).
         """
-        js_script = self.generate_js_fetch("GET", url, headers)
         _, session = self._get_session(**kwargs)
-        result = await session.page.evaluate(js_script)
-        return result
+
+        response = await session.context.request.get(url, headers=headers)
+
+        if not response.ok:
+            # ném lỗi rõ ràng để dễ debug
+            raise Exception(f"Request failed {response.status}: {await response.text()}")
+
+        return await response.text()
+
 
     async def generate_x_bogus(self, url: str, **kwargs):
         """Generate the X-Bogus header for a url"""

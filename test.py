@@ -6,59 +6,40 @@ from requests.adapters import HTTPAdapter, Retry
 from bs4 import BeautifulSoup
 from common.playwright_helper import PlaywrightHelper
 from common.s3_helper import S3Helper
+from common.db_helper import DatabaseHelper
 
 BASE_URL = "https://masothue.com/"
 MAX_WORKERS = 10
 MAX_RETRY_SECONDS = 180
 s3 = S3Helper()
+db_helper = DatabaseHelper(
+    host=config.MARIADB_HOST,
+    port=config.MARIADB_PORT,
+    user=config.MARIADB_USER,
+    password=config.MARIADB_PASS,
+    database="mydatabase"
+)
 
-async def get_links_province(api: PlaywrightHelper, session_index = 0):
-    html = await api.make_request(url=BASE_URL, session_index=session_index)
-    _, session = api._get_session(session_index=session_index)
-    await click_captcha_if_exists(session.page)
-    soup = BeautifulSoup(html, "html.parser")
-    links = ["https://masothue.com" + a.get("href") for a in soup.select("#sidebar > aside.widget.widget_categories.container > ul > li > a")]
-    
-    return links
-
-async def get_links_district(api: PlaywrightHelper, links_province: str, session_index = 0):
-    link_list = []
-    for link_province in links_province:
-        html = await api.make_request(url=link_province, session_index=session_index)
-        soup = BeautifulSoup(html, "html.parser")
-        links = ["https://masothue.com" + a.get("href") for a in soup.select("#sidebar > aside.widget.widget_categories.container > ul > li > a")]
-
-        # Wait
-        _, session = api._get_session(session_index=session_index)
-        await session.page.wait_for_timeout(500)
-
-
-
-        link_list.extend(links)
-    return link_list
-
-async def get_links_ward(api: PlaywrightHelper, links_district: str, session_index_list=None):
-    link_list = []
-    for link_district in links_district:
-        if session_index_list is not None:
-            session_index = random.choice(session_index_list)
-        else:
-            session_index = 0
-
-        html = await api.make_request(url=link_district, session_index=session_index)
-        soup = BeautifulSoup(html, "html.parser")
-        if soup.select_one("#sidebar > aside.widget.widget_categories.container > ul > li > a"):
-            links = ["https://masothue.com" + a.get("href") for a in soup.select("#sidebar > aside.widget.widget_categories.container > ul > li > a")]
-            
-            # Wait
-            _, session = api._get_session(session_index=session_index)
-            await session.page.wait_for_timeout(3000)
-            
-            print("===========================")
-            print(links)
-            print("===========================")
-            link_list.extend(links)
-    return link_list
+headers = {
+    'accept': '*/*',
+    'accept-language': 'vi,en;q=0.9',
+    'origin': 'https://masothue.com',
+    'priority': 'u=1, i',
+    'referer': 'https://masothue.com/',
+    'sec-ch-ua': '"Not;A=Brand";v="99", "Google Chrome";v="139", "Chromium";v="139"',
+    'sec-ch-ua-mobile': '?0',
+    'sec-ch-ua-platform': '"Linux"',
+    'sec-fetch-dest': 'empty',
+    'sec-fetch-mode': 'no-cors',
+    'sec-fetch-site': 'cross-site',
+    'sec-fetch-storage-access': 'active',
+    'user-agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36',
+    'x-browser-channel': 'stable',
+    'x-browser-copyright': 'Copyright 2025 Google LLC. All rights reserved.',
+    'x-browser-validation': 'OhMsc7acNx+0w+NEQM7p961tYAw=',
+    'x-browser-year': '2025',
+    'x-client-data': 'CIa2yQEIprbJAQipncoBCJGVywEIlqHLAQjGo8sBCIegzQEIjYDPARjh4s4B',
+}
 
 async def click_captcha_if_exists(page):
     """Click captcha nếu nó xuất hiện"""
@@ -70,15 +51,73 @@ async def click_captcha_if_exists(page):
     except:
         print("No captcha found.")
 
+async def get_links_province(api: PlaywrightHelper, session_index = 0):
+    html = await api.make_request(url=BASE_URL, headers=headers, session_index=session_index)
+    soup = BeautifulSoup(html, "html.parser")
+    links = ["https://masothue.com" + a.get("href") for a in soup.select("#sidebar > aside.widget.widget_categories.container > ul > li > a")]
+    for link in links:
+        db_helper.execute(
+            f"""
+            INSERT INTO province (link) VALUES ('{link}')
+            ON DUPLICATE KEY UPDATE
+            link = VALUES(link)
+            """
+        )
+    return links
 
+async def get_links_district(api: PlaywrightHelper, links_province: str, session_index = 0):
+    link_list = []
+    for link_province in links_province:
+        html = await api.make_request(url=link_province, headers=headers, session_index=session_index)
+        _, session = api._get_session(session_index=session_index)
+        soup = BeautifulSoup(html, "html.parser")
+        links = ["https://masothue.com" + a.get("href") for a in soup.select("#sidebar > aside.widget.widget_categories.container > ul > li > a")]
+        link_list.extend(links)
+        # Wait
+        await session.page.wait_for_timeout(10000)
+    for link in link_list:
+        db_helper.execute(
+            f"""
+            INSERT INTO district (link) VALUES ('{link}')
+            ON DUPLICATE KEY UPDATE
+            link = VALUES(link)
+            """
+        )
+    return link_list
+
+async def get_links_ward(api: PlaywrightHelper, links_district: str, session_index_list=None):
+    link_list = []
+    for link_district in links_district:
+        if session_index_list is not None:
+            session_index = random.choice(session_index_list)
+        else:
+            session_index = 0
+
+        html = await api.make_request(url=link_district, headers=headers, session_index=session_index)
+        _, session = api._get_session(session_index=session_index)
+
+        soup = BeautifulSoup(html, "html.parser")
+        if soup.select_one("#sidebar > aside.widget.widget_categories.container > ul > li > a"):
+            links = ["https://masothue.com" + a.get("href") for a in soup.select("#sidebar > aside.widget.widget_categories.container > ul > li > a")]
+            link_list.extend(links)
+        # Wait
+        await session.page.wait_for_timeout(10000)
+    for link in link_list:
+        db_helper.execute(
+            f"""
+            INSERT INTO ward (link) VALUES ('{link}')
+            ON DUPLICATE KEY UPDATE
+            link = VALUES(link)
+            """
+        )
+    return link_list
 
 async def search_users():
     async with PlaywrightHelper() as api:
-        await api.create_sessions(num_sessions=3, browser="chromium", starting_url=BASE_URL, headless=False)
+        await api.create_sessions(num_sessions=3, browser="chromium", starting_url=BASE_URL, headless=True)
         links_province = await get_links_province(api=api, session_index=0)
         links_district = await get_links_district(api=api, links_province=links_province, session_index=0)
         links_ward = await get_links_ward(api=api, links_district=links_district, session_index_list=[1,2])
-        print(links_ward)
 
 if __name__ == "__main__":
     asyncio.run(search_users())
