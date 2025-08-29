@@ -7,6 +7,7 @@ from bs4 import BeautifulSoup
 from common.playwright_helper import PlaywrightHelper
 from common.s3_helper import S3Helper
 from common.db_helper import DatabaseHelper
+from typing import List
 
 BASE_URL = "https://masothue.com/"
 MAX_WORKERS = 10
@@ -63,61 +64,77 @@ async def get_links_province(api: PlaywrightHelper, session_index = 0):
             link = VALUES(link)
             """
         )
+    print("✅ Got", len(links), "province links")
     return links
 
-async def get_links_district(api: PlaywrightHelper, links_province: str, session_index = 0):
+async def get_links_district(api: PlaywrightHelper, links_province: List[str], session_index = 0):
+    print("✅ Processing", len(links_province))
+    links_province = db_helper.execute("SELECT DISTINCT * FROM province WHERE flag = 0")
     link_list = []
     for link_province in links_province:
-        html = await api.make_request(url=link_province, headers=headers, session_index=session_index)
+        html = await api.make_request(url=link_province[0], headers=headers, session_index=session_index)
         _, session = api._get_session(session_index=session_index)
         soup = BeautifulSoup(html, "html.parser")
         links = ["https://masothue.com" + a.get("href") for a in soup.select("#sidebar > aside.widget.widget_categories.container > ul > li > a")]
+        for link in links:
+            db_helper.execute(
+                f"""
+                INSERT INTO district (link) VALUES ('{link}')
+                ON DUPLICATE KEY UPDATE
+                link = VALUES(link)
+                """
+            )
         link_list.extend(links)
         # Wait
         await session.page.wait_for_timeout(10000)
-    for link in link_list:
-        db_helper.execute(
-            f"""
-            INSERT INTO district (link) VALUES ('{link}')
-            ON DUPLICATE KEY UPDATE
-            link = VALUES(link)
-            """
-        )
+    
     return link_list
 
-async def get_links_ward(api: PlaywrightHelper, links_district: str, session_index_list=None):
+async def get_links_ward(api: PlaywrightHelper, session_index_list=None):
     link_list = []
+    links_district = db_helper.execute("SELECT DISTINCT * FROM district WHERE link > 'https://masothue.com/tra-cuu-ma-so-thue-theo-tinh/thi-xa-tu-son-331'")
     for link_district in links_district:
         if session_index_list is not None:
             session_index = random.choice(session_index_list)
         else:
             session_index = 0
 
-        html = await api.make_request(url=link_district, headers=headers, session_index=session_index)
+        html = await api.make_request(url=link_district[0], headers=headers, session_index=session_index)
         _, session = api._get_session(session_index=session_index)
 
         soup = BeautifulSoup(html, "html.parser")
         if soup.select_one("#sidebar > aside.widget.widget_categories.container > ul > li > a"):
             links = ["https://masothue.com" + a.get("href") for a in soup.select("#sidebar > aside.widget.widget_categories.container > ul > li > a")]
+            for link in links:
+                db_helper.execute(
+                    f"""
+                    INSERT INTO ward (link) VALUES ('{link}')
+                    ON DUPLICATE KEY UPDATE
+                    link = VALUES(link)
+                    """
+                )
             link_list.extend(links)
         # Wait
-        await session.page.wait_for_timeout(10000)
-    for link in link_list:
-        db_helper.execute(
-            f"""
-            INSERT INTO ward (link) VALUES ('{link}')
-            ON DUPLICATE KEY UPDATE
-            link = VALUES(link)
-            """
-        )
+        await session.page.wait_for_timeout(1000)
     return link_list
 
 async def search_users():
     async with PlaywrightHelper() as api:
         await api.create_sessions(num_sessions=3, browser="chromium", starting_url=BASE_URL, headless=True)
-        links_province = await get_links_province(api=api, session_index=0)
-        links_district = await get_links_district(api=api, links_province=links_province, session_index=0)
-        links_ward = await get_links_ward(api=api, links_district=links_district, session_index_list=[1,2])
+        await get_links_province(api=api, session_index=0)
+        await get_links_district(api=api, session_index=0)
+        await get_links_ward(api=api, session_index_list=[1,2])
+        
 
 if __name__ == "__main__":
-    asyncio.run(search_users())
+    s3 = S3Helper()
+    db_helper = DatabaseHelper(
+        host=config.MARIADB_HOST,
+        port=config.MARIADB_PORT,
+        user=config.MARIADB_USER,
+        password=config.MARIADB_PASS,
+        database="mydatabase"
+    )
+    x = db_helper.execute(f"SELECT flag FROM province WHERE link = 'https://masothue.com/tra-cuu-ma-so-thue-theo-tinh/quang-nam-49'")
+    if x[0][0] == False:
+        print("=======")

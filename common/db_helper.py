@@ -69,3 +69,22 @@ class DatabaseHelper:
             logging.error(e)
             raise e
         return -1
+    
+    def executemany(self, query, values):
+        """
+        Execute a query (INSERT, UPDATE, DELETE).
+        :param query: SQL query to execute
+        :param params: Parameters for the query
+        :return: True if the query was successful, else False
+        """
+        try:
+            with self.managed_cursor() as cursor:
+                cursor.executemany(query, values)
+                print(query)
+                result = cursor.fetchall()
+                return result
+        except Exception as e:
+            logging.debug(f'Error executemany query in Database: {query}')
+            logging.error(e)
+            raise e
+        return -1
