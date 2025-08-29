@@ -26,8 +26,6 @@ class DatabaseHelper:
                 password=self.password,
                 database=self.database
             )
-            if self.connection.is_connected():
-                logging.info("Connected to MySQL database")
         except Error as e:
             print(f"Error connecting to MySQL: {e}")
             return None
