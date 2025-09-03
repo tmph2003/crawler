@@ -135,6 +135,8 @@ if __name__ == "__main__":
         password=config.MARIADB_PASS,
         database="mydatabase"
     )
-    x = db_helper.execute(f"SELECT flag FROM province WHERE link = 'https://masothue.com/tra-cuu-ma-so-thue-theo-tinh/quang-nam-49'")
-    if x[0][0] == False:
-        print("=======")
+    x = db_helper.execute(f"SELECT link FROM province where flag = 0")
+    if not x:
+        print("===========")
+    links = [row[0] for row in x]
+    print(links)

@@ -20,4 +20,6 @@ class AppConfig(object):
     AWS_REGION = os.environ.get("AWS_REGION", "ap-southeast-1")
     BUCKET_NAME = os.environ.get("BUCKET_NAME", "crawl-data")
 
+    KEY_PROXY_ROATE = os.environ.get("BUCKET_NAME", "abc")
+
 config = AppConfig()
