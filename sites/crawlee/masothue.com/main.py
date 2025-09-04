@@ -81,7 +81,7 @@ async def main() -> None:
 
     # Handler mặc định -> lấy link province
     @crawler.router.default_handler
-    async def request_handler(context: BeautifulSoupCrawlingContext) -> None:
+    async def province_handler(context: BeautifulSoupCrawlingContext) -> None:
         await asyncio.sleep(2)
         context.log.info(f'Processing {context.request.url} ...')
         # Get link from navigation pane
@@ -108,7 +108,7 @@ async def main() -> None:
 
     # Handler cho province -> lấy district
     @crawler.router.handler("province")
-    async def province_handler(context: BeautifulSoupCrawlingContext) -> None:
+    async def district_handler(context: BeautifulSoupCrawlingContext) -> None:
         await asyncio.sleep(2)
         context.log.info(f'Processing province: {context.request.url}')
         # # Check đã crawl chưa [TODO: flag = False THEN crawl]
@@ -136,7 +136,7 @@ async def main() -> None:
         
 
     @crawler.router.handler("district")
-    async def district_handler(context: BeautifulSoupCrawlingContext) -> None:
+    async def ward_handler(context: BeautifulSoupCrawlingContext) -> None:
         await asyncio.sleep(2)
         context.log.info(f'Processing district: {context.request.url}')
         

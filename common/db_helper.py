@@ -59,9 +59,8 @@ class DatabaseHelper:
         try:
             with self.managed_cursor() as cursor:
                 cursor.execute(query)
-                print(query)
-                result = cursor.fetchall()
-                return result
+                if query.strip().lower().startswith("select"):
+                    return cursor.fetchall()
         except Exception as e:
             logging.debug(f'Error execute query in Database: {query}')
             logging.error(e)
@@ -78,9 +77,8 @@ class DatabaseHelper:
         try:
             with self.managed_cursor() as cursor:
                 cursor.executemany(query, values)
-                print(query)
-                result = cursor.fetchall()
-                return result
+                if query.strip().lower().startswith("select"):
+                    return cursor.fetchall()
         except Exception as e:
             logging.debug(f'Error executemany query in Database: {query}')
             logging.error(e)
