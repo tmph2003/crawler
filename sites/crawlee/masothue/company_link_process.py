@@ -1,5 +1,6 @@
 import asyncio
 import time
+from datetime import datetime
 
 from crawlee.crawlers import BeautifulSoupCrawler, BeautifulSoupCrawlingContext
 from common.db_helper import DatabaseHelper
@@ -8,6 +9,7 @@ from common.network_helper import NetworkHelper
 from config.config import config
 from crawlee._request import Request, RequestOptions
 from crawlee.proxy_configuration import ProxyConfiguration
+from urllib.parse import urlparse, urlunparse
 
 s3 = S3Helper()
 network_helper = NetworkHelper()
@@ -30,13 +32,19 @@ def update_flag(table: str, link: str):
     """
     db_helper.execute(sql)
 
+
+def normalize_url(url: str) -> str:
+    parsed = urlparse(url)
+    # Giữ lại scheme, domain, path; bỏ query (?...) và fragment (#...)
+    return urlunparse((parsed.scheme, parsed.netloc, parsed.path, '', '', ''))
+
 async def failed_request_handler(context: BeautifulSoupCrawlingContext, error):
     status_code = getattr(error, "status_code", None)
     context.log.warning(f"⚠️ Request lỗi ({status_code}), đổi proxy...")
 
     try:
         # Delay tránh bị chặn tiếp
-        time.sleep(10)
+        await asyncio.sleep(10)
         request = context.request
 
         request_options = RequestOptions(url=request.url, label=request.label, user_data=request.user_data, unique_key=request.unique_key)
@@ -64,33 +72,48 @@ async def process_link(context: BeautifulSoupCrawlingContext):
 
     # Ghép thành list tuple (masothue, link)
     data_company = [
-        (t, h) for t, h in zip(titles, hrefs)
+        (t, h, datetime.now()) for t, h in zip(titles, hrefs)
     ]
 
     sql = """
-        INSERT INTO company_link (masothue, link)
-        VALUES (%s, %s)
-        ON DUPLICATE KEY UPDATE link = VALUES(link)
+        INSERT INTO company_link (masothue, link, crawled_at)
+        VALUES (%s, %s, %s)
+        ON DUPLICATE KEY UPDATE
+        link = VALUES(link),
+        crawled_at = VALUES(crawled_at)
     """
 
     # Insert nhiều record cùng lúc
     if data_company:
         db_helper.executemany(sql, data_company)
         print(f"✅ INSERT {len(hrefs)} links từ {url}")
+
+    if 'tra-cuu-ma-so-thue-theo-nganh-nghe' in url:
+        table = "industry"
+
     if len(hrefs) == 25:
         if "?page=" not in url:
             url = url + "?page=1"
+
         base_url, current_page = url.split("?page=")
         current_page = int(current_page)
+
         if current_page >= 10:
-            print(f"⛔ Dừng crawl tại trang {current_page} của {base_url}")
-            update_flag("ward", url)
+            print(f"UPDATE {normalize_url(url)}")
+            update_flag("ward", normalize_url(url))
+            update_flag("district", normalize_url(url))
+            update_flag("province", normalize_url(url))
             return
+
         next_page = current_page + 1
         next_url = f"{base_url}?page={next_page}"
         await context.add_requests([next_url], forefront=True)
+
     else:
-        update_flag("ward", url)
+        print(f"UPDATE {normalize_url(url)}")
+        update_flag("ward", normalize_url(url))
+        update_flag("district", normalize_url(url))
+        update_flag("province", normalize_url(url))
         return
 
 
@@ -99,13 +122,13 @@ async def main():
     # host, port, user, password = network_helper.get_proxy()
     proxy_configuration = ProxyConfiguration(
         proxy_urls=[
-            f"http://user12006:0sj4@103.179.188.215:12006/",
-            f"http://user11809:0sj4@103.179.188.215:11809/"
+            f"http://user18634:1756989016@103.179.188.215:18634/",
+            f"http://user18733:1756989016@103.179.188.215:18733/"
         ],
     )
     crawler = BeautifulSoupCrawler(
         max_requests_per_crawl=10000,
-        proxy_configuration=proxy_configuration
+        proxy_configuration=proxy_configuration,
     )
     
     # host, port, user, password = network_helper.get_proxy()
@@ -115,16 +138,33 @@ async def main():
 
     # lấy batch link từ DB
     rows = db_helper.execute("""
-        SELECT link FROM ward
-        WHERE flag = False
-        ORDER BY link ASC
+        SELECT link, id AS sort_key
+        FROM ward
+        WHERE flag = FALSE
+
+        UNION ALL
+                             
+        SELECT link, id AS sort_key
+        FROM district
+        WHERE flag = FALSE
+                             
+        UNION ALL
+                             
+        SELECT link, id AS sort_key
+        FROM province
+        WHERE flag = FALSE
+                             
+        UNION ALL
+
+        SELECT link, ma_nganh AS sort_key
+        FROM industry
+        WHERE flag = FALSE
+
+        ORDER BY sort_key ASC
     """)
     urls = [row[0] for row in rows]
-    print("=====================================")
-    print(len(urls))
-    print("=====================================")
     if rows:        
-        batch_size = 10
+        batch_size = 20
         for i in range(0, len(urls), batch_size):
             batch = urls[i:i+batch_size]
             print(f"🚀 Chạy batch {i//batch_size + 1}, gồm {len(batch)} links")

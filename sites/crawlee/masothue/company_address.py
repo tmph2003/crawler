@@ -1,4 +1,5 @@
 import asyncio
+import time
 
 from crawlee.crawlers import BeautifulSoupCrawler, BeautifulSoupCrawlingContext
 from common.db_helper import DatabaseHelper
@@ -32,51 +33,31 @@ def insert_links(table: str, links: list):
     values = [(link,) for link in links]
     db_helper.executemany(sql, values)
 
-def update_flag(table: str, link: str):
-    """
-    Set flag=True for the given link in the specified table.
-    """
-    sql = f"""
-        UPDATE {table}
-        SET flag = True
-        WHERE link = '{link}'
-    """
-    db_helper.execute(sql)
-
 async def failed_request_handler(context: BeautifulSoupCrawlingContext, error):
     status_code = getattr(error, "status_code", None)
     context.log.warning(f"⚠️ Request lỗi ({status_code}), đổi proxy...")
 
     try:
-        # Lấy proxy mới
-        host, port, user, password = network_helper.get_proxy()
-        context.proxy_info.url = [f"http://{user}:{password}@{host}:{port}/"]                                                   
-
         # Delay tránh bị chặn tiếp
-        await asyncio.sleep(5)
+        time.sleep(10)
         request = context.request
 
         request_options = RequestOptions(url=request.url, label=request.label, user_data=request.user_data, unique_key=request.unique_key)
         request = Request.from_url(**request_options)
-        await context.enqueue_links(requests=[request])
+        await context.add_requests(requests=[request], forefront=True)
 
     except Exception as e:
         context.log.error(f"❌ Không đổi proxy được: {e}")
 
 async def main() -> None:
-    host, port, user, password = network_helper.get_proxy()
     proxy_configuration = ProxyConfiguration(
-        proxy_urls=[
-            f"http://{user}:{password}@{host}:{port}/"
-        ],
+        proxy_urls=config.PROXY_URLS,
     )
     crawler = BeautifulSoupCrawler(
         max_requests_per_crawl=10000,
         proxy_configuration=proxy_configuration
     )
     
-    host, port, user, password = network_helper.get_proxy()
-    crawler._proxy_configuration._proxy_urls = f"http://{user}:{password}@{host}:{port}/"
     crawler.failed_request_handler(handler=failed_request_handler)
 
     # Handler mặc định -> lấy link province
@@ -149,17 +130,7 @@ async def main() -> None:
         links_new = [link for link in links if link not in links_exist]
         if links_new:
             insert_links(table="ward", links=links)
-            update_flag(table="district", link=context.request.url)
             context.log.info(f"✅ Inserted {len(links_new)} ward links")
-        
-        # enqueue links tới province handler
-        # all_link = list(set(links_exist + links_new))
-        # requests = []
-        # for link in all_link:
-        #     request_options = RequestOptions(url=link, label="ward")
-        #     request = Request.from_url(**request_options)
-        #     requests.append(request)
-        # await context.enqueue_links(requests=requests)
 
     # Chạy crawler sau khi đã khai báo đủ handler
     await crawler.run(['https://masothue.com'])
